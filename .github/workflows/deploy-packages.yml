@@ -1,7 +1,7 @@
 name: Publish package to GitHub Packages
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   release:
     types: [created]
 jobs:
@@ -18,7 +18,29 @@ jobs:
           java-version: 25
           java-distribution: temurin
           maven-version: 3.9.11
+      - name: Check if version already deployed
+        id: check-version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          groupId=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.groupId)
+          artifactId=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.artifactId)
+          version=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)
+          groupPath=${groupId//./\/}
+          url="https://maven.pkg.github.com/$OWNER/$REPO/$groupPath/$artifactId/$version/${artifactId}-${version}.pom"
+          echo "Checking $url"
+          http_code=$(curl -s -o /dev/null -w "%{http_code}" -u "${GITHUB_ACTOR}:${GITHUB_TOKEN}" "$url" || echo "000")
+          if [ "$http_code" = "200" ]; then
+            echo "Version $version already exists in repository."
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Version $version not found (HTTP $http_code). Will deploy."
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
       - name: Publish package
+        if: steps.check-version.outputs.exists == 'false'
         run: mvn --batch-mode deploy -Pghrepo
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
